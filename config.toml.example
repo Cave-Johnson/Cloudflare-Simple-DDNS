@@ -1,0 +1,17 @@
+# Cloudflare settings
+cloudflare_zone_id = "your-cloudflare-zone-id"
+cloudflare_api_key = "your-cloudflare-zone-api-key"
+cloudflare_email = "your-email@example.com"
+record_name = "sub.example.com"
+
+# SMTP settings
+smtp_enabled = "true"
+smtp_server = "smtp.yourprovider.com"
+smtp_port = 587
+smtp_credentials_required = true
+smtp_username = "your-smtp-username"
+smtp_password = "your-smtp-password"
+alert_email = "your-alert-email@example.com"
+mail_from = "ddns@yourdomain.com"
+smtp_use_tls = "true"  # Set to "true" for STARTTLS (port 587)
+smtp_use_ssl = "false" # Set to "true" for Implicit SSL (port 465)
