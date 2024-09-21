@@ -41,7 +41,7 @@ Ensure your system meets the following requirements:
   - `dig`
   - `jq`
   - `grep`
-  - `awk`
+  - `gawk`
   - `sed`
   - `getopt`
 - **Permissions**:
@@ -248,7 +248,7 @@ The installer sets up a cron job that runs the script every 5 minutes. To modify
   - For example, on Ubuntu/Debian:
 
     ```bash
-    sudo apt-get install curl dnsutils jq grep awk sed getopt
+    sudo apt-get install curl dnsutils jq grep gawk sed getopt
     ```
 
 ### **Enabling Detailed Debugging**
