@@ -55,7 +55,7 @@ Ensure your system meets the following requirements:
 1. **Clone the Repository**:
 
    ```bash
-   git clone https://github.com/yourusername/cloudflare-ddns.git
+   git clone https://github.com/Cave-Johnson/Cloudflare-Simple-DDNS
    ```
 
 2. **Navigate to the Script Directory**:
@@ -314,7 +314,7 @@ Contributions are welcome! If you have suggestions for improvements or have foun
 
 ## License
 
-This project is licensed under the [MIT License](LICENSE).
+This project is licensed under the [GNU General Public License (GPL) v3](LICENSE).
 
 ---
 
@@ -324,7 +324,7 @@ This project is licensed under the [MIT License](LICENSE).
 
 ## Contact
 
-For support or questions, please open an issue on the [GitHub repository](https://github.com/yourusername/cloudflare-ddns/issues).
+For support or questions, please open an issue on the [GitHub repository](https://github.com/Cave-Johnson/Cloudflare-Simple-DDNS/issues).
 
 ---
 
