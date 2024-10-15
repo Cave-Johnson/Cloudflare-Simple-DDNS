@@ -218,7 +218,7 @@ function get_external_ip() {
     if [ "$ip_type" == "ipv4" ]; then
         external_ip=$(dig +short +time=5 +tries=3 myip.opendns.com @resolver1.opendns.com)
     elif [ "$ip_type" == "ipv6" ]; then
-        external_ip=$(dig -6 +short +time=5 +tries=3 myipv6.opendns.com aaaa @resolver1.ipv6-sandbox.opendns.com)
+        external_ip=$(dig -6 +short +time=5 +tries=3 myip.opendns.com aaaa @resolver1.opendns.com)
     else
         logger ERROR "Invalid IP type specified: $ip_type"
         return 1
