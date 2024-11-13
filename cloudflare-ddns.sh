@@ -218,7 +218,7 @@ function get_external_ip() {
     if [ "$ip_type" == "ipv4" ]; then
         external_ip=$(dig +short +time=5 +tries=3 myip.opendns.com @resolver1.opendns.com)
     elif [ "$ip_type" == "ipv6" ]; then
-        external_ip=$(dig -6 +short +time=5 +tries=3 myipv6.opendns.com aaaa @resolver1.ipv6-sandbox.opendns.com)
+        external_ip=$(dig -6 +short +time=5 +tries=3 myip.opendns.com aaaa @resolver1.opendns.com)
     else
         logger ERROR "Invalid IP type specified: $ip_type"
         return 1
@@ -709,7 +709,7 @@ function install_script() {
 
     if [[ ! -f "$CONFIG_FILE" ]]; then
         logger INFO "Creating a new config file at $CONFIG_FILE. Please configure it."
-        sudo cp "./config.toml" "$CONFIG_FILE"
+        sudo cp "./config.toml.example" "$CONFIG_FILE"
         sudo chmod 600 "$CONFIG_FILE"
     else
         logger SUCCESS "Config file already exists at $CONFIG_FILE."
