@@ -1,7 +1,9 @@
 #!/bin/bash
 
 # Script version for comparison
-SCRIPT_VERSION="1.10.0"
+SCRIPT_VERSION="1.12.0"
+IPV6_ONLY=false
+
 
 # Constants
 INSTALL_DIR="/opt/cloudflare-ddns"
@@ -216,26 +218,45 @@ function get_external_ip() {
     local external_ip
 
     if [ "$ip_type" == "ipv4" ]; then
-        external_ip=$(dig +short +time=5 +tries=3 myip.opendns.com @resolver1.opendns.com)
+        # Try DNS lookup first, silencing errors and grabbing last line
+        external_ip=$(dig +short +time=5 +tries=3 myip.opendns.com @resolver1.opendns.com \
+                      2>/dev/null | tail -n1)
+        # Fallback to HTTP if dig gave nothing valid
+        if ! [[ "$external_ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            logger WARN "DNS lookup failed or no IPv4 found. Falling back to HTTP lookup."
+            external_ip=$(curl -s https://ipv4.icanhazip.com | tr -d '[:space:]')
+        fi
     elif [ "$ip_type" == "ipv6" ]; then
-        external_ip=$(dig -6 +short +time=5 +tries=3 myip.opendns.com aaaa @resolver1.opendns.com)
+        # Try DNS lookup first (IPv6)
+        external_ip=$(dig -6 +short +time=5 +tries=3 myip.opendns.com aaaa @resolver1.opendns.com \
+                      2>/dev/null | tail -n1)
+        # Fallback to HTTP if dig gave nothing valid
+        if ! [[ "$external_ip" =~ ^([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}$ ]]; then
+            logger WARN "DNS lookup failed or no IPv6 found. Falling back to HTTP lookup."
+            external_ip=$(curl -s https://ipv6.icanhazip.com | tr -d '[:space:]')
+        fi
     else
         logger ERROR "Invalid IP type specified: $ip_type"
         return 1
     fi
 
-    # Check if the external IP is a valid IP address
-    if [[ "$ip_type" == "ipv4" && ! "$external_ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-        logger WARN "No external IPv4 address found."
-        return 1
-    elif [[ "$ip_type" == "ipv6" && ! "$external_ip" =~ ^([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}$ ]]; then
-        logger WARN "No external IPv6 address found."
-        return 1
+    # Final validation
+    if [[ "$ip_type" == "ipv4" ]]; then
+        if ! [[ "$external_ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            logger WARN "No external IPv4 address found."
+            return 1
+        fi
+    else
+        if ! [[ "$external_ip" =~ ^([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}$ ]]; then
+            logger WARN "No external IPv6 address found."
+            return 1
+        fi
     fi
 
     echo "$external_ip"
     return 0
 }
+
 
 
 # Function to fetch DNS records from Cloudflare
@@ -483,11 +504,11 @@ function update_dns_record() {
 
 # Function to perform the DNS update operation
 function update_dns() {
-    logger INFO "Starting DNS update process for $RECORD_NAME"
+    logger INFO "Starting DNS update process for $RECORD_NAME (ipv6-only=${IPV6_ONLY})"
 
     local errors=()
     local cloudflare_records
-    local record_types=()
+    local record_types
 
     # Initialize UPDATES_MADE variable
     UPDATES_MADE=""
@@ -507,11 +528,20 @@ function update_dns() {
         return 1
     fi
 
+    # If ipv6-only mode, drop A records
+    if [ "$IPV6_ONLY" = true ]; then
+        record_types=$(echo "$record_types" | grep -w "AAAA" || true)
+        if [ -z "$record_types" ]; then
+            logger WARN "IPv6-only mode and no AAAA records found for $RECORD_NAME. Skipping update."
+            return 1
+        fi
+    fi
+
     # Check for existence of A and AAAA records
     has_a_record=$(echo "$record_types" | grep -w "A")
     has_aaaa_record=$(echo "$record_types" | grep -w "AAAA")
 
-    if [ -z "$has_a_record" ]; then
+    if [ -z "$has_a_record" ] && [ "$IPV6_ONLY" != true ]; then
         logger INFO "No A record found for $RECORD_NAME. Skipping A record update."
     fi
 
@@ -524,7 +554,6 @@ function update_dns() {
         case "$record_type" in
             A)
                 logger INFO "Processing A (IPv4) record..."
-                # Retrieve current DNS record info
                 record_info=$(echo "$cloudflare_records" | jq -r '.result[] | select(.type=="A") | "\(.id)|\(.content)"')
                 record_id=$(echo "$record_info" | cut -d'|' -f1)
                 current_dns_ip=$(echo "$record_info" | cut -d'|' -f2)
@@ -540,7 +569,6 @@ function update_dns() {
                 ;;
             AAAA)
                 logger INFO "Processing AAAA (IPv6) record..."
-                # Retrieve current DNS record info
                 record_info=$(echo "$cloudflare_records" | jq -r '.result[] | select(.type=="AAAA") | "\(.id)|\(.content)"')
                 record_id=$(echo "$record_info" | cut -d'|' -f1)
                 current_dns_ip=$(echo "$record_info" | cut -d'|' -f2)
@@ -560,14 +588,14 @@ function update_dns() {
         esac
     done
 
-    # After processing all records, check if any updates were made
+    # After processing all records, send email if updates were made
     if [ -n "$UPDATES_MADE" ]; then
-        # Send a single email with all updates
         local subject="Cloudflare DDNS Update: $RECORD_NAME Records Updated"
         local body="The following DNS records for $RECORD_NAME have been updated:\n$UPDATES_MADE"
         send_email "$subject" "$body"
     fi
 
+    # Report overall success or failure
     if [ ${#errors[@]} -ne 0 ]; then
         logger ERROR "Failed to update the following records: ${errors[*]}"
         return 1
@@ -576,6 +604,7 @@ function update_dns() {
         return 0
     fi
 }
+
 
 
 # Function to validate the configuration
@@ -784,7 +813,7 @@ function main() {
     ACTION="run"
 
     # Parse command-line arguments
-    TEMP=$(getopt -o idhvVc: -l install,debug,debug-level:,help,version,verbose,config:,run -- "$@")
+    TEMP=$(getopt -o idhvVc: -l install,debug,debug-level:,help,version,verbose,config:,run,ipv6-only -- "$@")
     if [ $? != 0 ] ; then
         echo "Terminating..." >&2
         exit 1
@@ -823,6 +852,10 @@ function main() {
                 ;;
             --run)
                 ACTION="run"
+                shift
+                ;;
+                --ipv6-only)
+                IPV6_ONLY=true
                 shift
                 ;;
             --)
