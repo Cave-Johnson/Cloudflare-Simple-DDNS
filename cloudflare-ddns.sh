@@ -597,7 +597,7 @@ function validate_config() {
 
     if [[ -z "$RECORD_NAME" ]]; then
         errors+=("record_name is missing.")
-    elif ! [[ "$RECORD_NAME" =~ ^(([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,})$ ]]; then
+    elif ! [[ "$RECORD_NAME" =~ ^(\*\.)?([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$ ]]; then
         errors+=("record_name '$RECORD_NAME' is not a valid domain name.")
     fi
 
