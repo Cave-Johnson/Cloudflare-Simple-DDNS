@@ -21,6 +21,7 @@ A robust Bash script for updating Cloudflare DNS records with your current exter
 ## Features
 
 - **IPv4 and IPv6 Support**: Automatically updates both A (IPv4) and AAAA (IPv6) DNS records.
+- **IPv6 Only Mode**: Run in an IPv6 only mode. 
 - **Email Notifications**: Sends email alerts when IP addresses are updated.
 - **SMTP Support**: Supports SMTP with SSL/TLS (ports 25, 465, 587) and authentication.
 - **Robust Logging**: Detailed logs with adjustable verbosity and debug levels.
@@ -45,8 +46,11 @@ Ensure your system meets the following requirements:
   - `sed`
   - `getopt`
 - **Permissions**:
-  - Ability to install scripts to `/opt` directory (or modify the script for a different location)
+  - Ability to install scripts to `/usr/bin/local` directory (or modify the script for a different location)
+  - Ability to install config files to `/etc/` directory 
   - Ability to set up cron jobs for scheduled execution
+
+It is required to install the script using sudo / root
 
 ---
 
@@ -72,17 +76,17 @@ Ensure your system meets the following requirements:
 
 4. **Run the Installer**:
 
-   The installer will copy the script to `/opt/cloudflare-ddns/`, create a default configuration file, and set up a cron job.
+   The installer will copy the script to `/usr/local/bin/cloudflare-ddns/`, create a default configuration file in `/etc/cloudflare-ddns/config.toml`, and set up a cron job.
 
    ```bash
    sudo ./cloudflare-ddns.sh --install
    ```
 
-   **Note**: You may need `sudo` permissions to install the script and set up the cron job.
+   **Note**: You will need `sudo` permissions to install the script and set up the cron job.
 
 5. **Configure the Script**:
 
-   Edit the configuration file located at `/opt/cloudflare-ddns/config.toml` with your preferred text editor:
+   Edit the configuration file located at `/etc/cloudflare-ddns/config.toml` with your preferred text editor:
 
    ```bash
    sudo nano /opt/cloudflare-ddns/config.toml
@@ -116,7 +120,7 @@ smtp_use_tls              = false                     # Use STARTTLS (usually po
 smtp_use_ssl              = true                      # Use SSL/TLS (usually port 465)
 ```
 
-The script has been tested with AWS SES, however other SMTP servers should work as well.
+The script has been tested with AWS SES, however, other SMTP servers should work as well.
 
 ### **Configuration Options**
 
@@ -126,6 +130,8 @@ The script has been tested with AWS SES, however other SMTP servers should work 
 - `cloudflare_api_key`: Your Cloudflare API Token with permissions to edit DNS records. For security, use a scoped API Token rather than your Global API Key.
 - `cloudflare_email`: Your Cloudflare account email address.
 - `record_name`: The DNS record you wish to update (e.g., `subdomain.example.com`).
+
+Note: wildcard subdomains are supported such as `*.mydomain.com`
 
 #### **SMTP Settings**
 
@@ -164,6 +170,7 @@ The script can be run manually or set up to run automatically via cron.
 - `-V, --verbose`          : Toggle verbose output (on by default).
 - `-c, --config FILE`      : Specify a custom configuration file.
 - `--run`                  : Run the DNS update process (default action).
+- `--ipv6`                 : Run in IPv6 only mode    
 
 ### **Examples**
 
@@ -176,19 +183,19 @@ The script can be run manually or set up to run automatically via cron.
 - **Run the script manually with debug output**:
 
   ```bash
-  ./cloudflare-ddns.sh --debug
+  cloudflare-ddns.sh --debug
   ```
 
 - **Run the script with maximum debug output**:
 
   ```bash
-  ./cloudflare-ddns.sh --debug-level 2
+  cloudflare-ddns.sh --debug-level 2
   ```
 
 - **Use a custom configuration file**:
 
   ```bash
-  ./cloudflare-ddns.sh --config /path/to/config.toml
+  cloudflare-ddns.sh --config /path/to/config.toml
   ```
 
 ### **Cron Setup**
@@ -271,10 +278,11 @@ tail -f /var/log/cloudflare-ddns.log
 
 - **Protect Your Configuration File**:
 
-  Ensure that `config.toml` is secured with appropriate permissions to prevent unauthorized access to sensitive information:
-
+  Ensure that `config.toml` is secured with appropriate permissions to prevent unauthorized access to sensitive information.
+  By default, a permission of 600 is set so that only the root user can read the configuration file.
+- 
   ```bash
-  sudo chmod 600 /opt/cloudflare-ddns/config.toml
+  sudo chmod 600 /etc/cloudflare-ddns/config.toml
   ```
 
 - **Use Scoped API Tokens**:
