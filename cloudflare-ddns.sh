@@ -1,23 +1,25 @@
-#!/bin/bash
+#!/usr/bin/env bash
+
+set -euo pipefail
 
 # Script version for comparison
 TOOL_VERSION="2.0.1"
 TOOL_VERSION_DATE="2025-07-16"        # Date of the version update
 IPV6_ONLY=false
-
+SUPPORTS_SMTPS=false
+SUPPORTS_STARTTLS=false
 
 # Constants
-INSTALL_DIR="/usr/local/bin/cloudflare-ddns"
-SCRIPT_NAME="cloudflare-ddns"
-CONFIG_NAME="config.toml"
-CONFIG_DIR="/etc/cloudflare-ddns"
-CONFIG_FILE="$CONFIG_DIR/config.toml"
-LOGFILE="/var/log/cloudflare-ddns.log"
+readonly INSTALL_DIR="/usr/local/bin"
+readonly TOOL_NAME="cloudflare-ddns"
+readonly CONFIG_NAME="config.toml"
+readonly CONFIG_DIR="/etc/cloudflare-ddns"
+CONFIG_FILE="$CONFIG_DIR/$CONFIG_NAME"
+readonly LOGFILE="/var/log/cloudflare-ddns.log"
 CRON_EXPRESSION="*/5 * * * *"
-CRON_JOB="$CRON_EXPRESSION $INSTALL_DIR/$SCRIPT_NAME --run >> $LOGFILE 2>&1"
+CRON_JOB="$CRON_EXPRESSION $INSTALL_DIR/$TOOL_NAME --run >> $LOGFILE 2>&1"
 DEBUG_LEVEL=0  # Default debug level is 0 (no debug)
 VERBOSE=true   # Default to verbose mode
-CONFIG_FILE="$INSTALL_DIR/$CONFIG_NAME" # Default config file path
 MAX_LOG_SIZE=1048576 # 1MB
 
 # Log levels
@@ -30,6 +32,10 @@ YELLOW='\033[0;33m'
 BLUE='\033[0;34m'
 MAGENTA='\033[0;35m'
 RESET='\033[0m'
+
+if [[ -n "${NO_COLOR:-}" ]]; then
+  GREEN=''; RED=''; YELLOW=''; BLUE=''; MAGENTA=''; RESET=''
+fi
 
 # Trap errors and clean up
 trap 'echo -e "${RED}An error occurred. Exiting...${RESET}" >&2; exit 1' ERR
@@ -111,7 +117,8 @@ function logger() {
 
 
 # Function to check if required dependencies are installed
-function check_dependencies() {
+check_dependencies() {
+    # Ensure required binaries exist
     for cmd in "${REQUIRED_CMDS[@]}"; do
         if ! command -v "$cmd" &> /dev/null; then
             logger ERROR "Required dependency '$cmd' is not installed."
@@ -119,15 +126,36 @@ function check_dependencies() {
         fi
     done
 
-    # Check if curl has SSL support
-    if ! curl --version | grep -q "SSL"; then
-        logger ERROR "Curl does not have SSL support. Please install a version of curl with SSL support."
+    # Check curl protocols line for SMTP/SMTPS
+    local curl_protos
+    curl_protos=$(curl --version | awk '/Protocols:/ {print $0}')
+
+    if ! grep -q 'smtp' <<<"$curl_protos"; then
+        logger ERROR "curl built without SMTP support. Install a curl with 'smtp' protocol."
         exit 1
     fi
 
-    # Check if curl has SMTP support
-    if ! curl --version | grep -q "smtp"; then
-        logger ERROR "Curl does not have SMTP support. Please install a version of curl with SMTP support."
+    if grep -q 'smtps' <<<"$curl_protos"; then
+        SUPPORTS_SMTPS=true
+        logger DEBUG "curl supports implicit SMTPS (smtps://)."
+    fi
+
+    # Check explicit STARTTLS support
+    if curl --help 2>&1 | grep -q -- '--starttls smtp'; then
+        SUPPORTS_STARTTLS=true
+        logger DEBUG "curl supports explicit '--starttls smtp'."
+    fi
+
+    # Final check
+    if ! $SUPPORTS_SMTPS && ! $SUPPORTS_STARTTLS; then
+        logger ERROR "curl supports SMTP but neither implicit SMTPS nor STARTTLS."
+        logger ERROR "Rebuild or upgrade curl with --with-smtp-ssl or --with-smtp-starttls."
+        exit 1
+    fi
+
+    # HTTPS/SSL
+    if ! curl --version | grep -q "SSL"; then
+        logger ERROR "curl lacks SSL support. Please install a TLS‑enabled curl."
         exit 1
     fi
 }
@@ -227,7 +255,7 @@ function get_external_ip() {
         # Fallback to HTTP if dig gave nothing valid
         if ! [[ "$external_ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             logger WARN "DNS lookup failed or no IPv4 found. Falling back to HTTP lookup."
-            external_ip=$(curl -s https://ipv4.icanhazip.com | tr -d '[:space:]')
+            external_ip=$(curl -s --max-time 5 https://ipv4.icanhazip.com | tr -d '[:space:]')
         fi
     elif [ "$ip_type" == "ipv6" ]; then
         # Try DNS lookup first (IPv6)
@@ -236,7 +264,7 @@ function get_external_ip() {
         # Fallback to HTTP if dig gave nothing valid
         if ! [[ "$external_ip" =~ ^([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}$ ]]; then
             logger WARN "DNS lookup failed or no IPv6 found. Falling back to HTTP lookup."
-            external_ip=$(curl -s https://ipv6.icanhazip.com | tr -d '[:space:]')
+            external_ip=$(curl -s --max-time 5 https://ipv6.icanhazip.com | tr -d '[:space:]')
         fi
     else
         logger ERROR "Invalid IP type specified: $ip_type"
@@ -250,7 +278,7 @@ function get_external_ip() {
             return 1
         fi
     else
-        if ! [[ "$external_ip" =~ ^([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}$ ]]; then
+        if ! [[ "$external_ip" =~ ^([0-9A-Fa-f]{0,4}:){2,7}[0-9A-Fa-f]{0,4}$ ]]; then
             logger WARN "No external IPv6 address found."
             return 1
         fi
@@ -294,6 +322,7 @@ function validate_smtp_config() {
     if [ "$SMTP_USE_TLS" == "true" ] && [ "$SMTP_USE_SSL" == "true" ]; then
         logger ERROR "Both smtp_use_tls and smtp_use_ssl cannot be true at the same time."
         return 1
+
     fi
 
     logger INFO "Validating SMTP configuration..."
@@ -507,24 +536,26 @@ function update_dns_record() {
 
 # Function to perform the DNS update operation
 function update_dns() {
-    logger INFO "Starting DNS update process for $RECORD_NAME (ipv6-only=${IPV6_ONLY})"
-
+    local UPDATES_MADE=""
     local errors=()
     local cloudflare_records
     local record_types
 
-    # Initialize UPDATES_MADE variable
-    UPDATES_MADE=""
+    logger INFO "Starting DNS update process for $RECORD_NAME (ipv6-only=${IPV6_ONLY})"
 
     # Fetch DNS records from Cloudflare
-    cloudflare_records=$(get_cloudflare_records)
-    if [ $? -ne 0 ]; then
-        logger ERROR "Failed to retrieve DNS records for $RECORD_NAME from Cloudflare."
+    cloudflare_records=$(get_cloudflare_records) || return 1
+
+    # Bail on any Cloudflare‑side errors
+    api_ok=$(echo "$cloudflare_records" | jq -r '.success? // false')
+    if [ "$api_ok" != "true" ]; then
+        err_msgs=$(echo "$cloudflare_records" | jq -r '.errors[]?.message // "Unknown error"')
+        logger ERROR "Cloudflare API error fetching records: $err_msgs"
         return 1
     fi
 
-    # Determine which record types exist
-    record_types=$(echo "$cloudflare_records" | jq -r '.result[].type')
+    # Pull record types safely (no crash on null)
+    record_types=$(echo "$cloudflare_records" | jq -r '.result?[]?.type' 2>/dev/null || true)
 
     if [ -z "$record_types" ]; then
         logger WARN "No DNS records found for $RECORD_NAME."
@@ -717,26 +748,26 @@ function load_config() {
 }
 
 
-# Function to install the script and configuration
+# Function to install the tool and configuration file
 function install_script() {
     logger INFO "Installing script to $INSTALL_DIR..."
 
     # Ensure the install directory exists
-    sudo mkdir -p "$INSTALL_DIR"
+    mkdir -p "$INSTALL_DIR"
 
     # Copy self to /usr/local/bin/cloudflare-ddns
-    sudo cp "$0" "$INSTALL_DIR/$SCRIPT_NAME"
-    sudo chmod +x "$INSTALL_DIR/$SCRIPT_NAME"
-    logger SUCCESS "Installed script as $INSTALL_DIR/$SCRIPT_NAME"
+    cp "$0" "$INSTALL_DIR/$TOOL_NAME"
+    chmod +x "$INSTALL_DIR/$TOOL_NAME"
+    logger SUCCESS "Installed script as $INSTALL_DIR/$TOOL_NAME"
 
     # Ensure config directory exists
     logger INFO "Creating config directory $CONFIG_DIR"
-    sudo mkdir -p "$CONFIG_DIR"
+    mkdir -p "$CONFIG_DIR"
 
     # Copy example config into place if missing
     if [[ ! -f "$CONFIG_FILE" ]]; then
-        sudo cp "./config.toml.example" "$CONFIG_FILE"
-        sudo chmod 600 "$CONFIG_FILE"
+        cp "./config.toml.example" "$CONFIG_FILE"
+        chmod 600 "$CONFIG_FILE"
         logger SUCCESS "Created config file at $CONFIG_FILE"
     else
         logger SUCCESS "Config file already exists at $CONFIG_FILE"
@@ -877,7 +908,22 @@ function main() {
             check_dependencies
             load_config
 
-            if [ "$SMTP_ENABLED" == "true" ]; then
+            if [[ "$SMTP_ENABLED" == "true" ]]; then
+                if [[ "$SMTP_USE_SSL" == "true" && "$SUPPORTS_SMTPS" == "true" ]]; then
+                    logger INFO "Implicit SMTPS will be used (smtp_use_ssl=true, curl supports smtps://)."
+                elif [[ "$SMTP_USE_TLS" == "true" && "$SUPPORTS_STARTTLS" == "true" ]]; then
+                    logger INFO "Explicit STARTTLS will be used (smtp_use_tls=true, curl supports --starttls smtp)."
+                else
+                    logger WARN "SMTP enabled in config, but curl does not support the requested TLS mode."
+                    logger WARN "Switch SMTP to use smtp_use_ssl true in config"
+                    logger WARN "Continuing without email alerts."
+                    SMTP_ENABLED=false
+                fi
+            else
+                logger INFO "SMTP is disabled in config; continuing without email alerts."
+            fi
+
+            if [[ "$SMTP_ENABLED" == "true" ]]; then
                 validate_smtp_config || logger WARN "SMTP configuration validation failed. Continuing without email alerts."
             fi
 
