@@ -1,17 +1,20 @@
 #!/bin/bash
 
 # Script version for comparison
-SCRIPT_VERSION="1.12.0"
+TOOL_VERSION="2.0.1"
+TOOL_VERSION_DATE="2025-07-16"        # Date of the version update
 IPV6_ONLY=false
 
 
 # Constants
-INSTALL_DIR="/opt/cloudflare-ddns"
-SCRIPT_NAME="cloudflare-ddns.sh"
+INSTALL_DIR="/usr/local/bin/cloudflare-ddns"
+SCRIPT_NAME="cloudflare-ddns"
 CONFIG_NAME="config.toml"
+CONFIG_DIR="/etc/cloudflare-ddns"
+CONFIG_FILE="$CONFIG_DIR/config.toml"
 LOGFILE="/var/log/cloudflare-ddns.log"
 CRON_EXPRESSION="*/5 * * * *"
-CRON_JOB="$CRON_EXPRESSION $INSTALL_DIR/$SCRIPT_NAME --run >> /var/log/cloudflare-ddns.log 2>&1"
+CRON_JOB="$CRON_EXPRESSION $INSTALL_DIR/$SCRIPT_NAME --run >> $LOGFILE 2>&1"
 DEBUG_LEVEL=0  # Default debug level is 0 (no debug)
 VERBOSE=true   # Default to verbose mode
 CONFIG_FILE="$INSTALL_DIR/$CONFIG_NAME" # Default config file path
@@ -716,44 +719,39 @@ function load_config() {
 
 # Function to install the script and configuration
 function install_script() {
-    logger INFO "Installing script..."
+    logger INFO "Installing script to $INSTALL_DIR..."
 
-    if [[ ! -d "$INSTALL_DIR" ]]; then
-        logger INFO "Creating directory $INSTALL_DIR..."
-        sudo mkdir -p "$INSTALL_DIR"
-    fi
+    # Ensure the install directory exists
+    sudo mkdir -p "$INSTALL_DIR"
 
-    if [[ -f "$INSTALL_DIR/$SCRIPT_NAME" ]]; then
-        existing_version=$(grep "^# Script version" "$INSTALL_DIR/$SCRIPT_NAME" | awk -F'=' '{print $2}' | tr -d ' "')
-        if [[ "$existing_version" == "$SCRIPT_VERSION" ]]; then
-            logger SUCCESS "The script is already installed with the same version ($SCRIPT_VERSION)."
-        else
-            logger INFO "Updating to version $SCRIPT_VERSION."
-        fi
-    fi
-
+    # Copy self to /usr/local/bin/cloudflare-ddns
     sudo cp "$0" "$INSTALL_DIR/$SCRIPT_NAME"
     sudo chmod +x "$INSTALL_DIR/$SCRIPT_NAME"
-    logger SUCCESS "Script installed at $INSTALL_DIR/$SCRIPT_NAME."
+    logger SUCCESS "Installed script as $INSTALL_DIR/$SCRIPT_NAME"
 
+    # Ensure config directory exists
+    logger INFO "Creating config directory $CONFIG_DIR"
+    sudo mkdir -p "$CONFIG_DIR"
+
+    # Copy example config into place if missing
     if [[ ! -f "$CONFIG_FILE" ]]; then
-        logger INFO "Creating a new config file at $CONFIG_FILE. Please configure it."
         sudo cp "./config.toml.example" "$CONFIG_FILE"
         sudo chmod 600 "$CONFIG_FILE"
+        logger SUCCESS "Created config file at $CONFIG_FILE"
     else
-        logger SUCCESS "Config file already exists at $CONFIG_FILE."
+        logger SUCCESS "Config file already exists at $CONFIG_FILE"
     fi
 }
 
 
 # Function to check if the cron job already exists
 function check_cron_job() {
-    crontab -l | grep -F "$CRON_JOB" &> /dev/null
-    if [ $? -eq 0 ]; then
+    # Only add the line if it's not already present
+    if crontab -l 2>/dev/null | grep -F "$CRON_JOB" &>/dev/null; then
         logger SUCCESS "Cron job is already set up."
     else
-        logger INFO "Setting up cron job..."
-        (crontab -l; echo "$CRON_JOB") | crontab -
+        logger INFO "Adding cron job: $CRON_JOB"
+        (crontab -l 2>/dev/null; echo "$CRON_JOB") | crontab -
         logger SUCCESS "Cron job added."
     fi
 }
@@ -839,7 +837,7 @@ function main() {
                 exit 0
                 ;;
             -v|--version)
-                echo "Cloudflare DDNS Update Script - Version $SCRIPT_VERSION"
+                echo "Cloudflare DDNS Update Script - Version $TOOL_VERSION"
                 exit 0
                 ;;
             -V|--verbose)
