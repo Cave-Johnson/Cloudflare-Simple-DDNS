@@ -790,6 +790,13 @@ function check_cron_job() {
 
 # Function to install the entire system
 function install_system() {
+
+    # root check
+    if (( EUID != 0 )); then
+        logger ERROR "Installation must be run as root (use sudo)."
+        exit 1
+    fi
+
     logger INFO "Checking for required dependencies..."
     check_dependencies
     logger SUCCESS "All dependencies are satisfied."
